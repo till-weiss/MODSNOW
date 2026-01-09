@@ -1,0 +1,10 @@
+data/
+*.nc
+*.tif
+*.tiff
+*.h5
+*.csv
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+
