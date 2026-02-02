@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import matplotlib.pyplot as plt
 import scipy.stats as stats
@@ -9,6 +10,83 @@ import pandas as pd
 import requests as r
 import getpass, pprint, time, os, json
 import geopandas as gpd
+from pathlib import Path
+
+
+def process_snow(
+    snow_path: str,
+    ndvi: pd.DataFrame,
+    out_csv: str,
+    base_cols=("Year", "Day", "Snow_Mean"),
+    window_days: int = 16
+) -> pd.DataFrame:
+    # --- sanity ---
+    if not isinstance(ndvi, pd.DataFrame):
+        raise TypeError("Pass the NDVI DataFrame (ndvi), not the path.")
+    if "Date" not in ndvi.columns:
+        raise ValueError("ndvi must contain a 'Date' column.")
+
+    ndvi_dates = pd.Index(
+        pd.to_datetime(ndvi["Date"])
+        .dropna()
+        .drop_duplicates()
+        .sort_values()
+    )
+
+    # --- read snow ---
+    snow = pd.read_csv(snow_path, delim_whitespace=True)
+
+    # rename snow columns: base + numbered extras (Snow_Percent becomes col_1, etc.)
+    ncols = snow.shape[1]
+    if ncols < len(base_cols):
+        raise ValueError(
+            f"Snow file has {ncols} columns but base_cols expects {len(base_cols)}."
+        )
+
+    snow.columns = list(base_cols) + [
+        f"col_{i}" for i in range(1, ncols - len(base_cols) + 1)
+    ]
+
+    # date column
+    snow["Date"] = (
+        pd.to_datetime(snow["Year"].astype(int).astype(str), format="%Y")
+        + pd.to_timedelta(snow["Day"] - 1, unit="D")
+    )
+
+    # daily snow
+    snow_daily = snow.set_index("Date").resample("D").asfreq()
+
+    # ensure we can compute the forward window up to last NDVI date + window
+    full_index = pd.date_range(
+        start=ndvi_dates.min(),
+        end=ndvi_dates.max() + pd.Timedelta(days=window_days - 1),
+        freq="D",
+    )
+    snow_d = snow_daily.reindex(full_index)
+
+    # --- compute 16d means for ALL col_* columns ---
+    col_cols = [c for c in snow_d.columns if c.startswith("col_")]
+
+    # output only at NDVI dates (NO NDVI COLUMN)
+    out = snow_d.loc[ndvi_dates].copy()
+
+    # add col_*_16d for each numbered column (includes former Snow_Percent as col_1_16d)
+    for c in col_cols:
+        out[f"{c}_16d"] = [
+            snow_d.loc[d: d + pd.Timedelta(days=window_days - 1), c].mean()
+            for d in ndvi_dates
+        ]
+
+    # time fields
+    out = out.reset_index().rename(columns={"index": "Date"})
+    out["Year"] = out["Date"].dt.year
+    out["Month"] = out["Date"].dt.month
+    out["DOY"] = out["Date"].dt.dayofyear
+
+    # save all columns in 'out'
+    out.to_csv(out_csv, index=False)
+    return out
+
 
 def get_modis_ndvi(shp, dir, name):
 
@@ -126,7 +204,14 @@ def get_modis_ndvi(shp, dir, name):
 
 
 
-def plot_ndvi_timeseries(ndvi_snow):
+def plot_ndvi_timeseries(ndvi_snow, label, out_dir = str | Path | None):
+
+    if out_dir is None:
+        out_dir = Path('plots')         
+    else:
+        out_dir = Path(out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     df_corr = ndvi_snow[['NDVI', 'Snow_16d']].dropna()
 
@@ -134,6 +219,9 @@ def plot_ndvi_timeseries(ndvi_snow):
     y = df_corr['NDVI']
 
     slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+
+    y_pred = intercept + slope * x
+    rmse = np.sqrt(np.mean((y - y_pred) ** 2))
 
     x_fit = np.linspace(x.min(), x.max(), 100)
     y_fit = intercept + slope * x_fit
@@ -144,23 +232,30 @@ def plot_ndvi_timeseries(ndvi_snow):
 
     plt.xlabel('Snow cover (16-day mean) [%]')
     plt.ylabel('NDVI')
-    plt.title('NDVI vs Snow cover')
+    plt.title(f'NDVI vs. Snow cover {label}')
     plt.grid(True)
 
     n_obs = len(df_corr)
 
     plt.text(
         0.95, 0.95,
-        f'NDVI = {slope:.4f} × Snow + {intercept:.4f}\n'
+        f'NDVI = {slope:.4f} × SCA + {intercept:.4f}\n'
         f'n = {n_obs}\n'
         f'$r$ = {r_value:.3f}; '
-        f'$r^2$ = {r_value**2:.3f}',
+        f'$r^2$ = {r_value**2:.3f}; '
+        f'RMSE = {rmse:.4f}',
         transform=plt.gca().transAxes,
         va='top', ha='right',
         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
     )
 
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    filename = out_dir / f'ndvi_scatter_{safe_label}.png'
+
+
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
+    plt.close()
 
     pearson_coef, pearson_p = stats.pearsonr(x, y)
     spearman_coef, spearman_p = stats.spearmanr(x, y)
@@ -173,7 +268,14 @@ def plot_ndvi_timeseries(ndvi_snow):
     print(f'Regression p-value: {p_value:.3e}')
 
 
-def compute_cor_heatmap(ndvi_snow):
+def compute_cor_heatmap(ndvi_snow, label, out_dir = str | Path | None):
+
+    if out_dir is None:
+        out_dir = Path('plots')         
+    else:
+        out_dir = Path(out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     ndvi_wide = ndvi_snow.pivot(index='Year', columns='DOY', values='NDVI')
     snow_wide = ndvi_snow.pivot(index='Year', columns='DOY', values='Snow_16d')
@@ -201,11 +303,24 @@ def compute_cor_heatmap(ndvi_snow):
 
     plt.xlabel('Snow cover DOY')
     plt.ylabel('NDVI DOY')
-    plt.title('NDVI–Snow DOY × DOY Pearson Correlation (r)')
+    plt.title(f'NDVI–Snow DOY × DOY Pearson Correlation (r) {label}')
+
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    filename = out_dir / f'ndvi_snow_cor_heatmap_{safe_label}.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+
     plt.show()    
+    plt.close()
 
 
-def stat_filter_heatmap(ndvi_snow):
+def stat_filter_heatmap(ndvi_snow, label, out_dir = str | Path | None):
+
+    if out_dir is None:
+        out_dir = Path('plots')         
+    else:
+        out_dir = Path(out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     ndvi_wide = ndvi_snow.pivot(index='Year', columns='DOY', values='NDVI')
     snow_wide = ndvi_snow.pivot(index='Year', columns='DOY', values='Snow_16d')
@@ -240,8 +355,14 @@ def stat_filter_heatmap(ndvi_snow):
 
     plt.xlabel('Snow cover DOY')
     plt.ylabel('NDVI DOY')
-    plt.title('Unfiltered Significant NDVI–Snow DOY × DOY Correlations (p ≤ 0.05)')
+    plt.title(f'Significant NDVI–Snow DOY × DOY Correlations (p ≤ 0.05) {label}')
+
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    filename = out_dir / f'heatmap_sig_{safe_label}.png'
+
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
+    plt.close()
 
     ci_significant = ~(
         (ci_low_mat <= 0) & (ci_high_mat >= 0)
@@ -255,11 +376,23 @@ def stat_filter_heatmap(ndvi_snow):
 
     plt.xlabel('Snow cover DOY')
     plt.ylabel('NDVI DOY')
-    plt.title('NDVI–Snow Correlations with 95% CI Not Crossing Zero')
+    plt.title(f'NDVI–Snow Correlations with 95% CI Not Crossing Zero {label}')
+
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    filename = out_dir / f'heatmap_ci_{safe_label}.png'
+
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
+    plt.close()
 
-def compute_cor2_heatmap(ndvi_snow):
+def compute_cor2_heatmap(ndvi_snow, label, out_dir = str | Path | None):
 
+    if out_dir is None:
+        out_dir = Path('plots')         
+    else:
+        out_dir = Path(out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     ndvi_wide = ndvi_snow.pivot(index='Year', columns='DOY', values='NDVI')
     snow_wide = ndvi_snow.pivot(index='Year', columns='DOY', values='Snow_16d')
@@ -289,5 +422,11 @@ def compute_cor2_heatmap(ndvi_snow):
 
     plt.xlabel('Snow cover DOY')
     plt.ylabel('NDVI DOY')
-    plt.title('Unfiltered NDVI–Snow DOY × DOY $r^2$')
+    plt.title(f'NDVI–Snow DOY × DOY $r^2$ {label}')
+
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    filename = out_dir / f'heatmap_corr2_{safe_label}.png'
+
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.show()
+    plt.close()
