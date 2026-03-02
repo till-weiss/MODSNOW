@@ -213,7 +213,7 @@ def run(args: argparse.Namespace) -> None:
 
     annual_tile = annual_tile.sel(year=years)
     x = sca_annual.loc[years].to_numpy(dtype=float)
-    y = annual_tile.to_numpy(dtype=float)
+    y = np.asarray(annual_tile.to_numpy(), dtype=float)
 
     slope, intercept, r2, n = _pixelwise_ols(x=x, y=y, min_n=args.min_n)
 
