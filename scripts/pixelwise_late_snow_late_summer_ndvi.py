@@ -2,6 +2,12 @@
 """
 Prototype: pixel-wise regression of late-snow metric vs late-summer NDVI.
 
+Example A (mean late snow vs mean NDVI):
+  python scripts/pixelwise_late_snow_late_summer_ndvi.py \
+    --ndvi_nc_path /path/to/NDVI_clean.nc \
+    --x0 1000 --y0 1000 --nx 50 --ny 50 \
+    --ndvi_doy_start 220 --ndvi_doy_end 280 \
+    --sca_doy_start 140 --sca_doy_end 200 \
 python pixelwise_late_snow_late_summer_ndvi.py \ 
     --ndvi_nc_path /Users/tillweiss/Desktop/MODSNOW/data/NDVI_nc/NDVI_clean.nc \ 
     --x0 0 --y0 0 \
@@ -25,6 +31,7 @@ Example A (mean late snow vs mean NDVI):
 
 Example B (late snow timing vs NDVI anomaly):
   python scripts/pixelwise_late_snow_late_summer_ndvi.py \
+    --ndvi_nc_path /path/to/NDVI_clean.nc \
     --ndvi_nc_path /Users/tillweiss/Desktop/MODSNOW/data/NDVI_nc/NDVI_clean.nc \
     --x0 1000 --y0 1000 --nx 50 --ny 50 \
     --ndvi_doy_start 220 --ndvi_doy_end 280 \
@@ -252,6 +259,7 @@ def run(args: argparse.Namespace) -> None:
         raise KeyError(
             f"Variable '{args.ndvi_var}' not found in {args.ndvi_nc_path}. Available variables: {available}"
         )
+
     if args.downsample > 1:
         ds = ds.coarsen(
             lat=args.downsample,
