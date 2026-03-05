@@ -2,7 +2,7 @@
 """
 Prototype: pixel-wise regression of late-snow metric vs late-summer NDVI.
 
-python pixelwise_late_snow_late_summer_ndvi.py \ 
+python scripts/pixelwise_late_snow_late_summer_ndvi.py \ 
     --ndvi_nc_path /Users/tillweiss/Desktop/MODSNOW/data/NDVI_nc/NDVI_clean.nc \ 
     --x0 0 --y0 0 \
     --nx 1601 --ny 1081 \
@@ -26,13 +26,14 @@ Example A (mean late snow vs mean NDVI):
 Example B (late snow timing vs NDVI anomaly):
   python scripts/pixelwise_late_snow_late_summer_ndvi.py \
     --ndvi_nc_path /Users/tillweiss/Desktop/MODSNOW/data/NDVI_nc/NDVI_clean.nc \
-    --x0 1000 --y0 1000 --nx 50 --ny 50 \
+    --x0 0 --y0 0 \
+    --nx 1601 --ny 1081 \
     --ndvi_doy_start 220 --ndvi_doy_end 280 \
     --ndvi_anomaly demean_pixel \
     --sca_doy_start 140 --sca_doy_end 220 \
     --sca_metric last_day_above \
     --sca_threshold 0.1 \
-    --out_nc_path pixelwise_late_snow_late_summer_ndvi.nc
+    --out_nc_path pixelwise_late_snow_late_summer_ndvi_anomaly.nc
 """
 
 from __future__ import annotations
